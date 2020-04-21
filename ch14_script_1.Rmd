@@ -27,8 +27,21 @@ cces <- read_rds("cces_initial.rds")
 
 1) What is the age of oldest person who responded to this survey?
 
+```{r age}
+cces %>%
+  arrange(desc(age)) %>%
+  slice(1) %>%
+  pull(age)
+```
+
+
 2) What proportion of females voted for Trump? 
 
+```{r fm_trump}
+cces %>%
+  filter(gender == 'Female') %>%
+  summarize(prop = sum(trump == 1)/n())
+```
 
 # Scene 2
 
@@ -36,25 +49,137 @@ cces <- read_rds("cces_initial.rds")
 
 1) Print out the model with the confidence interval and interpret the coefficient of `gender`? (Hint: use the divide-by-four rule.) Explain the association of Trump-voting with variables like `income` and `party` to your smart-but-not-mathematical boss. Why doesn't income matter?
 
+```{r model}
+
+logistic_mod <- logistic_reg() %>%
+  set_engine('glm')
+
+logistic_fit <- fit(logistic_mod,
+                   factor(trump) ~ gender + income + race + age + educ + ideology + party,
+                   data = cces)
+
+logistic_fit %>%
+  tidy(conf.int = TRUE)
+
+```
+
+
 2) What is the expected vote for Dom - who is Male, 37, holds a 4-year degree (placing him in the 5 `educ` bucket), Asian, makes $77,000, with `ideology` and `party` equal to 3. (Hint: use predict().)
 
+```{r}
+predict(logistic_fit,
+        new_data = tibble(gender = "Male",
+                         age = 37,
+                         educ = 5,
+                         race = "Asian",
+                         income = 8,
+                         ideology = 3,
+                         party = 3))
+```
 
 
 # Scene 3
 
 **Prompt:** Great! Now that you have created a logistic model to predict Trump vote, create two more models: CART (rpart) and randomforest. Set the seed to 1005. For rand_forest, set mtry = 7 to use all our predictors and set trees = 50 so your computer doesn't take forever to run.
 
-1) Interpret the output of the CART model (Hint: set extra = "auto" in `prp()`.) Where would Dom fall in this decision tree? 
+
+```{r}
+set.seed(1005)
+
+tree_mod <- decision_tree() %>%
+  set_engine('rpart',
+             model = TRUE) %>%
+  set_mode('classification')
+
+tree_fit <- fit(tree_mod,
+                factor(trump) ~ gender + income + race + age + educ + ideology + party,
+                data = cces)
+
+tree_fit_complex <- fit(update(tree_mod, cost_complexity = 0.001),
+                        factor(trump) ~ gender + income + race + age + educ + ideology + party,
+                        data = cces)
+
+tree_fit_complex$fit %>%
+  prp(extra = 'auto')
+
+forest_mod <- rand_forest(mtry = 7, trees = 50) %>%
+  set_engine("randomForest") %>%
+  set_mode("classification")
+
+forest_fit <- fit(forest_mod,
+                  factor(trump) ~ gender + income + race + age + educ + ideology + party,
+                  data = cces)
+```
+
+1) Interpret the output of the CART model (Hint: set extra = "auto" in `prp()`.) Where would Dom fall in this decision tree?
+
+```{r}
+tree_fit$fit %>%
+  prp(extra = 'auto')
+
+```
+
 
 2) Looking at the randomForest model, what does the OOB error tell us? Interpret the first row, second column of the confusion matrix, what does that 920 represent? How does 920 relate to the class.error of 0.078?
 
+```{r}
+forest_fit
+```
 
 
 # Scene 4
 
 **Prompt:** Now that we have our three models, let's see how well they stack up against each other. Use `predict()` on our three models with cces as the data. Then, use `bind_cols()` to combine the cces data with our predictions. Finally, use `accuracy()` to get the proportion of votes that the model correctly predicted
 
+```{r}
+logistic_preds <- predict(logistic_fit,
+                          new_data = cces)
+
+tree_preds <- predict(tree_fit,
+                      new_data = cces)
+
+forest_preds <- predict(forest_fit,
+                        new_data = cces)
+
+predictions <- cces %>%
+  bind_cols(logistic_preds,
+            tree_preds,
+            forest_preds) %>%
+  rename(log_pred = .pred_class,
+         tree_pred = .pred_class1,
+         forest_pred = .pred_class2)
+
+logistic_accuracy <- predictions %>%
+  accuracy(truth = trump, estimate = log_pred)
+tree_accuracy <- predictions %>%
+  accuracy(truth = trump, estimate = tree_pred)
+forest_accuracy <- predictions %>%
+  accuracy(truth = trump, estimate = forest_pred)
+
+```
+
+
 1) Compare the accuracy of our three models, use bind_rows() to put the three in a nice tibble. Which model appears to be the best?
 
+```{r}
+acc <- logistic_accuracy %>%
+  bind_rows(tree_accuracy) %>%
+  bind_rows(forest_accuracy) %>%
+  mutate(model = c('logistic', 'tree', 'forest')) %>%
+  select(model, .estimate) %>%
+  rename(accuracy = .estimate)
+```
+
+
 2) So the randomforest model appears to be the best model, how can we test that this is true? What should we worry about?
+
+
+
+
+
+
+
+
+
+
 
